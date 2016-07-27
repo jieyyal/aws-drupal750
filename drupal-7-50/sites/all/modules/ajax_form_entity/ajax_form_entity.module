@@ -77,7 +77,7 @@ function _ajax_form_entity_load_entities() {
   $entities = module_invoke_all('entity_info');
 
   $allowed_entities = array('entityforms', 'node', 'user', 'taxonomy', 'comment', 'field_collection_item');
-
+  
   // Only select fieldable entites that have bundle defined.
   foreach ($entities as $entity_name => $entity) {
     if (isset($entity['fieldable']) && isset($entity['bundles']) && $entity['bundles'] && array_search($entity_name, $allowed_entities)) {
@@ -157,7 +157,7 @@ function ajax_form_entity_form_alter(&$form, $form_state) {
             // Add cancel button to close the form
             $form['#suffix'] .= l(t('Cancel'), 'ajax-form-entity-field-collection-cancel/nojs/' . $form['form_build_id']['#value'], array('attributes' => array('class' => array('use-ajax button-collection-cancel cancel-' . $form['form_build_id']['#value']), 'style' => array('display:none'))));
             $form['#prefix'] .= l(t('Add an item'), 'javascript:void(0)', array('attributes' => array('id' => 'open-form' . $form['form_build_id']['#value'], 'class' => 'open-form ' . $form['form_build_id']['#value']), 'fragment' => 'refresh', 'external' => true));
-
+            
           }
           else {
             // Add cancel button to close the form
@@ -179,57 +179,26 @@ function ajax_form_entity_form_alter(&$form, $form_state) {
 }
 
 /**
- * Add commands for reload form wrappers if rebuild.
- *
- * @param type $build_id_old
- *  Old string id of form.
- * @param string $build_id_new
- *  New build id of form.
- * @param array $commands
- *  Commands array.
- * @param boolean $with_messages
- *  Add messages and preview wrappers.
- * @return array
- */
-function _ajax_form_entity_reload_wrappers($build_id_old, $build_id_new, &$commands = array(), $with_messages = TRUE) {
-    $commands[] = ajax_command_remove('#form-message-wrapper-' . $build_id_old);
-    $commands[] = ajax_command_remove('#preview-wrapper-top-' . $build_id_old);
-    $commands[] = ajax_command_remove('#preview-wrapper-bottom-' . $build_id_old);
-  if ($with_messages) {
-    $prefix = '<div id="form-message-wrapper-' . $build_id_new . '"><div></div></div>';
-    $preiew_top = '<div id="preview-wrapper-top-' . $build_id_new . '"></div>';
-    $suffix = '<div id="preview-wrapper-bottom-' . $build_id_new . '"></div>';
-  }
-  $reload_wrapper = '<div id="form-reload-' . $build_id_new . '"></div>';
-
-  if ($with_messages) {
-    $commands[] = ajax_command_before('#form-reload-' . $build_id_old, $prefix);
-    $commands[] = ajax_command_before('#form-reload-' . $build_id_old, $preiew_top);
-    $commands[] = ajax_command_after('#form-reload-' . $build_id_old, $suffix);
-  }
-  $commands[] = ajax_command_before('#form-reload-' . $build_id_old, $reload_wrapper);
-
-  return $commands;
-}
-
-/**
  * AJAX submit handler for entity message add form. Returns ajax commands to update the relevant message comments.
  * @return ajax commands (append to messages wrapper)
  */
 function ajax_form_entity_callback($form, $form_state) {
   $commands = array();
+  // Remove old potential errors and also removes the error classes in case if
+  // there is more than one ajaxified form in the same page.
+  $commands[] = ajax_command_invoke('input', 'removeClass', array('error'));
+  $commands[] = ajax_command_invoke('select', 'removeClass', array('error'));
+  $commands[] = ajax_command_invoke('textarea', 'removeClass', array('error'));
+  $commands[] = ajax_command_invoke('.form-checkboxes', 'removeClass', array('error'));
+  $commands[] = ajax_command_invoke('.form-radios', 'removeClass', array('error'));  
   // Return just error messages if there is an error.
   if ($errors = form_get_errors()) {
-		// Remove old potential errors.
-    $commands[] = ajax_command_invoke('input', 'removeClass', array('error'));
-    $commands[] = ajax_command_invoke('select', 'removeClass', array('error'));
-    $commands[] = ajax_command_invoke('textarea', 'removeClass', array('error'));
     // Change classes of the forms to display them as error.
-		// In  case of multiple form, IDs have numbers added (like page-node-form--2).
-		$form_number = '';
-		if (strpos($form['#id'], '--')) {
-			$form_number = '--' . substr($form['#id'], -1, 1); 
-		}
+    // In  case of multiple form, IDs have numbers added (like page-node-form--2).
+    $form_number = '';
+    if (strpos($form['#id'], '--')) {
+      $form_number = '--' . substr($form['#id'], -1, 1); 
+    }
     foreach ($errors as $name => $message) {
       $commands[] = ajax_command_invoke('#edit-' . str_replace(array('_', ']['), '-', $name) . $form_number, 'addClass', array('error'));
     }
@@ -266,49 +235,37 @@ function ajax_form_entity_callback($form, $form_state) {
       $id = 'preview-wrapper-bottom-' . $form['#build_id'];
       $commands[] = ajax_command_prepend('#' . $id, $entity_show);
     }
-
-  }
-
-  // Store form build id.
-  $form_build_id = $form['#build_id'];
-
-  // Case of creation : respect the settings and reload the form.
-  if (isset($form['new']['#value']) && $settings['reload']) {
-    // If field collection ,delete former Cancel link of the former form.
-    if($entity_type == 'field_collection_item') {
-      $commands [] = ajax_command_remove('a.cancel-' . $form['form_build_id']['#value']);
-    }
-    // Rebuilds the form.
-    $form_state['reloaded'] = 1;
-    $new_form_build = _ajax_form_entity_build_entity_forms($entity_type, $form, $form_state);
-    $build_id_old = $form['#build_id'];
-    if (isset($form['#build_id_old'])) {
-      _ajax_form_entity_reload_wrappers($form['#build_id_old'], $new_form_build['#build_id'], $commands, FALSE);
-      $build_id_old = $form['#build_id_old'];
-    }
-
-    // Use build id of new form.
-    $form_build_id = $new_form_build['#build_id'];
-    $commands[] = ajax_command_replace('#form-reload-' . $build_id_old, drupal_render($new_form_build));
-    $commands[] = ajax_command_remove('#form-reload-' . $form['#build_id']);
-    $commands[] = ajax_command_css('#open-form' . $new_form_build['#build_id'], array('display' => 'none'));
-  }
-  else {
-    $commands[] = ajax_command_remove('#form-reload-' . $form['#build_id']);
+    
   }
 
   // Return confirmation messages if any or empty session.
   if ($settings['message']) {
     // Removes any older message in the page.
     $commands[] = ajax_command_remove('.messages');
-    $commands[] = ajax_command_replace('#form-message-wrapper-' . $form_build_id . ' div', theme('status_messages'));
+    $commands[] = ajax_command_replace('#form-message-wrapper-' . $form['#build_id'] . ' div', theme('status_messages'));
   }
   else {
     unset($_SESSION['messages']['status']);
   }
 
+  // Case of creation : respect the settings and reload the form.
+  if (isset($form['new']['#value']) && $settings['reload']) {
+        // If field collection ,delete former Cancel link of the former form.
+    if($entity_type == 'field_collection_item') {
+      $commands [] = ajax_command_remove('a.cancel-' . $form['form_build_id']['#value']);
+    }
+    // Rebuilds the form.
+    $form_state['reloaded'] = 1;
+    $new_form_build = _ajax_form_entity_build_entity_forms($entity_type, $form, $form_state);
+    $commands[] = ajax_command_replace('#form-reload-' . $form['#build_id'], drupal_render($new_form_build));
+    //$new_link = l(t('Fermer'), 'javascript:void(0)', array('attributes' => array('id' => 'open-form' . $new_form_build['form_build_id']['#value'], 'class' => 'open-form ' . $new_form_build['form_build_id']['#value']), 'fragment' => 'refresh', 'external'=>true));
+    $commands[] = ajax_command_css('#open-form' . $new_form_build['#build_id'], array('display' => 'none'));
+  }
+  else {
+    $commands[] = ajax_command_remove('#form-reload-' . $form['#build_id']);
+  }
   $id = str_replace('_', '-', $entity_type . '-' . $bundle);
-  $commands[] = ajax_command_css('.remove-' . $id, array('display' => 'none'));
+  $commands[] = ajax_command_css('.remove-' . $id, array('display' => 'none')); 
   return array('#type' => 'ajax', '#commands' => $commands);
 }
 
@@ -388,8 +345,8 @@ function _ajax_form_entity_build_entity_forms($entity_type, $form = array(), $fo
     case 'entityform':
       // Case of creation and case of edition.
       if (!$entity) {
-        $entity = entityform_create($values = array());
         $entity->type = $form_state['build_info']['args'][0]->type;
+        $entity = entityform_create($values = array());
         $new_form_state['input'] = array();
         $new_form_state['build_info']['args'][] = $entity;
         return drupal_build_form($form['#form_id'], $new_form_state);
@@ -465,62 +422,66 @@ function ajax_form_entity_field_extra_fields() {
  * Implements hook_entity_view_alter().
  */
 function ajax_form_entity_entity_view_alter(&$build, $type) {
-  $bundle = $build['#bundle'];
-  // If activated, process with the entity.
-  $settings = variable_get('ajax_form_entity_' . $type . '_' . $bundle, array());
+  // It cannot be run without the bundle. @todo : check in which case it can occurs.
+  if (isset($build['#bundle'])) {
+    $bundle = $build['#bundle'];
+    // If activated, process with the entity.
+    $settings = variable_get('ajax_form_entity_' . $type . '_' . $bundle, array());
 
-  if (isset($settings['activate']) && $settings['activate']) {
-    switch ($type) {
-      case 'user':
-        $entity = $build['#account'];
-        $entity_id = $build['#account']->{$settings['id']};
-        break;
+    if (isset($settings['activate']) && $settings['activate']) {
+      switch ($type) {
+        case 'user':
+          $entity = $build['#account'];
+          $entity_id = $build['#account']->{$settings['id']};
+          break;
 
-      case 'field_collection_item':
-        $entity = $build['#entity'];
-        $entity_id = $build['#entity']->{$settings['id']};
-        break;
+        case 'field_collection_item':
+        case 'entityform':
+          $entity = $build['#entity'];
+          $entity_id = $build['#entity']->{$settings['id']};
+          break;
 
-      default:
-        $entity = $build['#' . $type];
-        $entity_id = $build['#' . $type]->{$settings['id']};
-    }
-
-    // Special ID for multiple form cases.
-    $special_id = uniqid();
-    drupal_add_library('system', 'drupal.ajax');
-
-    // Special wrapper.
-    if (isset($build['#prefix'])) {
-      $build['#prefix'] = '<div id="ajax-entity-form-' . $special_id . '">' . $build['#prefix'];
-    }
-    else {
-      $build['#prefix'] = '<div id="ajax-entity-form-' . $special_id . '">';
-    }
-    if (isset($build['#suffix'])) {
-      $build['#suffix'] .= '</div><div id="ajax-entity-form-wrapper-' . $special_id . '"></div>';
-    }
-    else {
-      $build['#suffix'] = '</div><div id="ajax-entity-form-wrapper-' . $special_id . '"></div>';
-    }
-
-    // If AJAX links are activated, add  them.
-    $class = 'ajax-entity-form-' . str_replace('_', '-', $type);
-    $class = ' ajax-entity-form-' . str_replace('_', '-', $type . '-' . $bundle);
-    if (entity_access('update', $build['#entity_type'], $entity)) {
-      if ($settings['edit_activate']) {
-        $build['ajax_edit_link']['#markup'] = '<div id="ajax-entity-form-edit-' . $special_id . '" class="ajax-entity-form-edit ' . $class . '" >';
-        $build['ajax_edit_link']['#markup'] .= l(t('Edit'), 'ajax-form-entity-edit/edit/nojs/' . $type . '/' . $entity_id . '/' . $special_id, array('attributes' => array('class' => array('use-ajax edit-link'))));
-        $build['ajax_edit_link']['#markup'] .= '</div>';
+        default:
+          $entity = $build['#' . $type];
+          $entity_id = $build['#' . $type]->{$settings['id']};
       }
-    }
-    if (entity_access('delete', $build['#entity_type'], $entity)) {
-      if ($settings['delete_activate']) {
-        // TODO : form instead of link for security reason. For now, sort of session to improve security. Not enough. @see ajax_form_entity_entity_delete_callback.
-        $_SESSION['ajax_form_entity_delete'][$special_id] = TRUE.
-        $build['ajax_delete_link']['#markup'] = '<div id="ajax-entity-form-delete-' . $special_id . '" class="ajax-entity-form-delete ' . $class . '">';
-        $build['ajax_delete_link']['#markup'] .= l(t('delete'), 'ajax-form-entity-delete/delete/nojs/' . $type . '/' . $entity_id . '/' . $special_id, array('attributes' => array('class' => array('use-ajax delete-link'))));
-        $build['ajax_delete_link']['#markup'] .= '</div>';
+
+      // Special ID for multiple form cases.
+      $special_id = uniqid();
+      drupal_add_library('system', 'drupal.ajax');
+
+      // Special wrapper.
+      if (isset($build['#prefix'])) {
+        $build['#prefix'] = '<div id="ajax-entity-form-' . $special_id . '">' . $build['#prefix'];
+      }
+      else {
+        $build['#prefix'] = '<div id="ajax-entity-form-' . $special_id . '">';
+      }
+      if (isset($build['#suffix'])) {
+        $build['#suffix'] .= '</div><div id="ajax-entity-form-wrapper-' . $special_id . '"></div>';
+      }
+      else {
+        $build['#suffix'] = '</div><div id="ajax-entity-form-wrapper-' . $special_id . '"></div>';
+      }
+
+      // If AJAX links are activated, add  them.
+      $class = 'ajax-entity-form-' . str_replace('_', '-', $type);
+      $class = ' ajax-entity-form-' . str_replace('_', '-', $type . '-' . $bundle);
+      if (entity_access('update', $build['#entity_type'], $entity)) {
+        if ($settings['edit_activate']) {
+          $build['ajax_edit_link']['#markup'] = '<div id="ajax-entity-form-edit-' . $special_id . '" class="ajax-entity-form-edit ' . $class . '" >';
+          $build['ajax_edit_link']['#markup'] .= l(t('Edit'), 'ajax-form-entity-edit/edit/nojs/' . $type . '/' . $entity_id . '/' . $special_id, array('attributes' => array('class' => array('use-ajax edit-link'))));
+          $build['ajax_edit_link']['#markup'] .= '</div>';
+        }
+      }
+      if (entity_access('delete', $build['#entity_type'], $entity)) {
+        if ($settings['delete_activate']) {
+          // TODO : form instead of link for security reason. For now, sort of session to improve security. Not enough. @see ajax_form_entity_entity_delete_callback.
+          $_SESSION['ajax_form_entity_delete'][$special_id] = TRUE.
+          $build['ajax_delete_link']['#markup'] = '<div id="ajax-entity-form-delete-' . $special_id . '" class="ajax-entity-form-delete ' . $class . '">';
+          $build['ajax_delete_link']['#markup'] .= l(t('delete'), 'ajax-form-entity-delete/delete/nojs/' . $type . '/' . $entity_id . '/' . $special_id, array('attributes' => array('class' => array('use-ajax delete-link'))));
+          $build['ajax_delete_link']['#markup'] .= '</div>';
+        }
       }
     }
   }
@@ -545,7 +506,7 @@ function theme_ajax_form_entity_deleted($vars) {
   $output = '<div id="deleted">';
   $output .= t($vars['content']);
   $output .= '</div>';
-
+  
   return $output;
 }
 
