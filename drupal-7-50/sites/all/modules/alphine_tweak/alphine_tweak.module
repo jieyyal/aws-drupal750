@@ -1,4 +1,19 @@
 <?php
+function alphine_tweak_init() {
+  if(arg(0) == 'node' && is_numeric(arg(1)) && $node = node_load(arg(1))){
+    $current_domain = domain_get_domain();
+    $domains = domain_get_node_domains($node->nid);
+    if (!in_array($current_domain['domain_id'], $domains['domain_id'])) {
+      $sourceDomain = array_shift(array_values($node->domains));
+      $sourceDomain2 = domain_lookup($sourceDomain);
+      //domain_goto($sourceDomain2);
+      if ($sourceDomain2['domain_id'] > 0 && $current_domain['domain_id'] != $sourceDomain2['domain_id']) {
+        $path = domain_get_uri($sourceDomain2);
+        drupal_goto($path, array(), 301);
+      }
+    }
+  }
+}
 function alphine_tweak_oauth_common_authorized($consumer, $access_token, $request_token) {
   $providers = oauthconnector_provider_load_all();
   foreach ($providers as $provider) {
