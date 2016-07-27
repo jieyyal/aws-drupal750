@@ -1,0 +1,19 @@
+<?php
+function alphine_tweak_oauth_common_authorized($consumer, $access_token, $request_token) {
+  $providers = oauthconnector_provider_load_all();
+  foreach ($providers as $provider) {
+    if ($provider->csid == $consumer->csid) {
+      $email = _oauthconnector_fetch_field('email', $provider, $access_token, $consumer);
+      if (substr($email, strpos($email, '@') + 1) != 'ciandt.com') {
+        drupal_access_denied();
+        drupal_exit();
+      }
+    }
+  }
+}
+function alphine_tweak_user_presave(&$edit, $account, $category) {
+$email = $edit['mail'];
+if (substr($email, strpos($email, '@') + 1) != 'ciandt.com') {
+  $edit['status'] = 0;
+}
+}
