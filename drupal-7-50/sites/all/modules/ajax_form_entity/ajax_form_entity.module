@@ -77,7 +77,7 @@ function _ajax_form_entity_load_entities() {
   $entities = module_invoke_all('entity_info');
 
   $allowed_entities = array('entityforms', 'node', 'user', 'taxonomy', 'comment', 'field_collection_item');
-  
+
   // Only select fieldable entites that have bundle defined.
   foreach ($entities as $entity_name => $entity) {
     if (isset($entity['fieldable']) && isset($entity['bundles']) && $entity['bundles'] && array_search($entity_name, $allowed_entities)) {
@@ -157,7 +157,7 @@ function ajax_form_entity_form_alter(&$form, $form_state) {
             // Add cancel button to close the form
             $form['#suffix'] .= l(t('Cancel'), 'ajax-form-entity-field-collection-cancel/nojs/' . $form['form_build_id']['#value'], array('attributes' => array('class' => array('use-ajax button-collection-cancel cancel-' . $form['form_build_id']['#value']), 'style' => array('display:none'))));
             $form['#prefix'] .= l(t('Add an item'), 'javascript:void(0)', array('attributes' => array('id' => 'open-form' . $form['form_build_id']['#value'], 'class' => 'open-form ' . $form['form_build_id']['#value']), 'fragment' => 'refresh', 'external' => true));
-            
+
           }
           else {
             // Add cancel button to close the form
@@ -179,6 +179,40 @@ function ajax_form_entity_form_alter(&$form, $form_state) {
 }
 
 /**
+ * Add commands for reload form wrappers if rebuild.
+ *
+ * @param type $build_id_old
+ *  Old string id of form.
+ * @param string $build_id_new
+ *  New build id of form.
+ * @param array $commands
+ *  Commands array.
+ * @param boolean $with_messages
+ *  Add messages and preview wrappers.
+ * @return array
+ */
+function _ajax_form_entity_reload_wrappers($build_id_old, $build_id_new, &$commands = array(), $with_messages = TRUE) {
+    $commands[] = ajax_command_remove('#form-message-wrapper-' . $build_id_old);
+    $commands[] = ajax_command_remove('#preview-wrapper-top-' . $build_id_old);
+    $commands[] = ajax_command_remove('#preview-wrapper-bottom-' . $build_id_old);
+  if ($with_messages) {
+    $prefix = '<div id="form-message-wrapper-' . $build_id_new . '"><div></div></div>';
+    $preiew_top = '<div id="preview-wrapper-top-' . $build_id_new . '"></div>';
+    $suffix = '<div id="preview-wrapper-bottom-' . $build_id_new . '"></div>';
+  }
+  $reload_wrapper = '<div id="form-reload-' . $build_id_new . '"></div>';
+
+  if ($with_messages) {
+    $commands[] = ajax_command_before('#form-reload-' . $build_id_old, $prefix);
+    $commands[] = ajax_command_before('#form-reload-' . $build_id_old, $preiew_top);
+    $commands[] = ajax_command_after('#form-reload-' . $build_id_old, $suffix);
+  }
+  $commands[] = ajax_command_before('#form-reload-' . $build_id_old, $reload_wrapper);
+
+  return $commands;
+}
+
+/**
  * AJAX submit handler for entity message add form. Returns ajax commands to update the relevant message comments.
  * @return ajax commands (append to messages wrapper)
  */
@@ -190,21 +224,29 @@ function ajax_form_entity_callback($form, $form_state) {
   $commands[] = ajax_command_invoke('select', 'removeClass', array('error'));
   $commands[] = ajax_command_invoke('textarea', 'removeClass', array('error'));
   $commands[] = ajax_command_invoke('.form-checkboxes', 'removeClass', array('error'));
-  $commands[] = ajax_command_invoke('.form-radios', 'removeClass', array('error'));  
+  $commands[] = ajax_command_invoke('.form-radios', 'removeClass', array('error'));
   // Return just error messages if there is an error.
   if ($errors = form_get_errors()) {
     // Change classes of the forms to display them as error.
     // In  case of multiple form, IDs have numbers added (like page-node-form--2).
     $form_number = '';
     if (strpos($form['#id'], '--')) {
-      $form_number = '--' . substr($form['#id'], -1, 1); 
+      $form_number = '--' . substr($form['#id'], -1, 1);
     }
     foreach ($errors as $name => $message) {
       $commands[] = ajax_command_invoke('#edit-' . str_replace(array('_', ']['), '-', $name) . $form_number, 'addClass', array('error'));
     }
     // Removes any older message in the page.
     $commands[] = ajax_command_remove('.messages');
+
+    // Reload wrappers if old build id exists.
+    if (isset($form['#build_id_old'])) {
+      _ajax_form_entity_reload_wrappers($form['#build_id_old'], $form['#build_id'], $commands);
+    }
+
     $commands[] = ajax_command_replace('#form-message-wrapper-' . $form['#build_id'] . ' div', theme('status_messages'));
+    // Update id for wrapper that contains a form.
+    $commands[] = ajax_command_invoke('#form-reload-' . $form['#build_id_old'], 'attr', array('id', 'form-reload-' . $form['#build_id']));
     return array('#type' => 'ajax', '#commands' => $commands);
   }
   $entity_type = $form['#entity_type'];
@@ -235,37 +277,49 @@ function ajax_form_entity_callback($form, $form_state) {
       $id = 'preview-wrapper-bottom-' . $form['#build_id'];
       $commands[] = ajax_command_prepend('#' . $id, $entity_show);
     }
-    
+
   }
 
-  // Return confirmation messages if any or empty session.
-  if ($settings['message']) {
-    // Removes any older message in the page.
-    $commands[] = ajax_command_remove('.messages');
-    $commands[] = ajax_command_replace('#form-message-wrapper-' . $form['#build_id'] . ' div', theme('status_messages'));
-  }
-  else {
-    unset($_SESSION['messages']['status']);
-  }
+  // Store form build id.
+  $form_build_id = $form['#build_id'];
 
   // Case of creation : respect the settings and reload the form.
   if (isset($form['new']['#value']) && $settings['reload']) {
-        // If field collection ,delete former Cancel link of the former form.
+    // If field collection ,delete former Cancel link of the former form.
     if($entity_type == 'field_collection_item') {
       $commands [] = ajax_command_remove('a.cancel-' . $form['form_build_id']['#value']);
     }
     // Rebuilds the form.
     $form_state['reloaded'] = 1;
     $new_form_build = _ajax_form_entity_build_entity_forms($entity_type, $form, $form_state);
-    $commands[] = ajax_command_replace('#form-reload-' . $form['#build_id'], drupal_render($new_form_build));
-    //$new_link = l(t('Fermer'), 'javascript:void(0)', array('attributes' => array('id' => 'open-form' . $new_form_build['form_build_id']['#value'], 'class' => 'open-form ' . $new_form_build['form_build_id']['#value']), 'fragment' => 'refresh', 'external'=>true));
+    $build_id_old = $form['#build_id'];
+    if (isset($form['#build_id_old'])) {
+      _ajax_form_entity_reload_wrappers($form['#build_id_old'], $new_form_build['#build_id'], $commands, FALSE);
+      $build_id_old = $form['#build_id_old'];
+    }
+
+    // Use build id of new form.
+    $form_build_id = $new_form_build['#build_id'];
+    $commands[] = ajax_command_replace('#form-reload-' . $build_id_old, drupal_render($new_form_build));
+    $commands[] = ajax_command_remove('#form-reload-' . $form['#build_id']);
     $commands[] = ajax_command_css('#open-form' . $new_form_build['#build_id'], array('display' => 'none'));
   }
   else {
     $commands[] = ajax_command_remove('#form-reload-' . $form['#build_id']);
   }
+
+  // Return confirmation messages if any or empty session.
+  if ($settings['message']) {
+    // Removes any older message in the page.
+    $commands[] = ajax_command_remove('.messages');
+    $commands[] = ajax_command_replace('#form-message-wrapper-' . $form_build_id . ' div', theme('status_messages'));
+  }
+  else {
+    unset($_SESSION['messages']['status']);
+  }
+
   $id = str_replace('_', '-', $entity_type . '-' . $bundle);
-  $commands[] = ajax_command_css('.remove-' . $id, array('display' => 'none')); 
+  $commands[] = ajax_command_css('.remove-' . $id, array('display' => 'none'));
   return array('#type' => 'ajax', '#commands' => $commands);
 }
 
@@ -506,7 +560,7 @@ function theme_ajax_form_entity_deleted($vars) {
   $output = '<div id="deleted">';
   $output .= t($vars['content']);
   $output .= '</div>';
-  
+
   return $output;
 }
 
